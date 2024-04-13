@@ -2,8 +2,9 @@
 
 import "mapUtil"
 import "listUtil"
-import "boardUtil"
+import "textUtil"
 import "bmfFonts"
+import "boardUtil"
 import "background"
 
 boardImg = file.loadImage("pics/triango-board.png")
@@ -189,12 +190,36 @@ printHelp = function(s, textColor)
 	smallFont.printCentered s, 480, 4, 1, textColor
 end function
 
+showCaptureButton = function
+	outer.captureBtn = new textUtil.DialogButton
+	captureBtn.caption = "Capture"
+	captureBtn.y = 25
+	captureBtn.x = 42
+	text.color = StoneSprite.tints[player]
+	captureBtn.draw
+	captureBtn.visible = true
+end function
+
+hideCaptureButton = function
+	text.row = captureBtn.y; text.column = captureBtn.x - 10
+	print " "*20
+	captureBtn.visible = false
+end function
+
+doCapture = function
+	d = textUtil.Dialog.make("Not Implemented", 
+	  "Sorry.  This feature is coming soon!")
+	d.okBtn.caption = "Rats!"
+	d.show
+end function
+
 players = [P1, P2]
 nextPlayer = function
 	i = players.indexOf(player)
 	i = (i + 1) % players.len
 	outer.player = players[i]
 	printHelp playerNames[player] + "'s turn.  Click an empty node to place a stone."	  
+	showCaptureButton
 end function
 player = players[-1]
 nextPlayer
@@ -213,6 +238,8 @@ while true
 			addStone idx
 			findTriangles
 			nextPlayer
+		else if captureBtn.visible and captureBtn.contains(mouse) then
+			if captureBtn.trackHit then doCapture
 		end if
 		while mouse.button; yield; end while
 	end if

@@ -9,7 +9,7 @@ There are a couple gameplay videos you can check out here, though neither of the
 - https://youtu.be/NJ788uEvYPA?si=0EIkbHWo2K61yoOk
 - https://youtu.be/SpYIIfdRnhI?si=wCcFucfs4OkkTgec
 
-The best implementation of this, from what I've been able to find, was the Apple IIGS.  It had amazing sound and (for the time) graphics, and was truly a thing of beauty.  The versions on other computers (even the Amiga) were not nearly as nice, and nothing like it exists today.
+The best implementation of this, from what I've been able to find, was for the Apple IIGS.  It had amazing sound and (for the time) graphics, and was truly a thing of beauty.  The versions on other computers (even the Amiga) were not nearly as nice, and nothing like it exists today.
 
 Time to change that!
 
