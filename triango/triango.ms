@@ -9,6 +9,7 @@ import "background"
 
 boardImg = file.loadImage("pics/triango-board.png")
 stoneImg = file.loadImage("pics/go-stone.png")
+stoneSelectedImg = file.loadImage("pics/stone-selected.png")
 
 smallFont = bmfFonts.Font.load("/sys/fonts/minimicro-pro-12.bmf")
 
@@ -24,9 +25,12 @@ playerNames = {P1:"Red", P2:"Blue", P3:"Green", P4:"Gray"}
 // has an open triangle, on each of the 55 spots on the board
 // (plus one for index 0, which is unused).  And also, what 
 // piece (0 or P1-P4) is at each space.
-closedTris = [0]*56
-openTris = [0]*56
-pieces = [0]*56
+resetState = function
+	globals.closedTris = [0]*56
+	globals.openTris = [0]*56
+	globals.pieces = [0]*56
+end function
+resetState
 
 // Functions to manipulate those triangle lists.
 setPlayer = function(triList, index, player)
@@ -41,33 +45,15 @@ isSet = function(triList, index, player)
 	return bitAnd(triList[index], player) > 0
 end function
 
-setTriangle = function(triList, idxA, idxB, idxC, player, updateDisplay=true)
-	// Assume that idxA and idxB are on the same row,
-	// and the triangle sides move towards idxC, which
-	// is on a row by itself.
-	posA = boardUtil.indexToColRow[idxA]
-	posB = boardUtil.indexToColRow[idxB]
-	posC = boardUtil.indexToColRow[idxC]	
-	row = posA[1]
-	colA = posA[0]
-	colB = posB[0]
-	endRow = posC[1]
-	endCol = posC[0]
-	while true
-		idx = boardUtil.colRowToIndex[[colA, row]]
-		for col in range(colA, colB)
-			setPlayer triList, idx, player
-			if updateDisplay then vis.updateCell idx
-			idx += 1
-		end for
-		if row == endRow then break
-		row += sign(endRow - row)		
-		if row % 2 then
-			colA += sign(endCol - colA)
-		else
-			colB += sign(endCol - colB)
-		end if
-	end while	
+setTriangle = function(triList, indexes, player, updateDisplay=true)
+	for idx in boardUtil.allPointsInTriangle(indexes)
+		setPlayer triList, idx, player
+		// Note: a point can't be both open AND closed for the same
+		// player.  So if this is the closed list, clear the open one.
+		if refEquals(triList, closedTris) then clearPlayer openTris, idx, player
+		
+		if updateDisplay then vis.updateCell idx
+	end for
 end function
 
 // Set up the displays.
@@ -105,6 +91,8 @@ StoneSprite.tints[P2] = "#8888FF"
 StoneSprite.tints[P3] = "#44FF44"
 StoneSprite.tints[P4] = "#CCCCCC"
 
+stoneAtIndex = {}	// key: position index; value: StoneSprite
+
 addStone = function(posIndex, player=null)
 	if player == null then player = globals.player
 	sp = new StoneSprite
@@ -112,17 +100,24 @@ addStone = function(posIndex, player=null)
 	sp.x = boardUtil.xForIndex(posIndex)
 	sp.y = boardUtil.yForIndex(posIndex)
 	sprites.push sp
+	stoneAtIndex[posIndex] = sp
 	pieces[posIndex] = player
 end function
 
-addTri = function(posA, posB, posC, closed=true)
-	for pos in [posA, posB, posC]
+clearStones = function
+	spriteDisp.sprites = []
+	outer.sprites = spriteDisp.sprites
+	stoneAtIndex = {}
+end function
+
+addTri = function(indexes, closed=true)
+	for pos in indexes
 		addStone pos
 	end for
 	if closed then
-		setTriangle closedTris, posA, posB, posC, player
+		setTriangle closedTris, indexes, player
 	else
-		setTriangle openTris, posA, posB, posC, player
+		setTriangle openTris, indexes, player
 	end if
 end function
 
@@ -134,47 +129,16 @@ end function
 loadVisualization "classic"
 //loadVisualization "sharp"
 
-findTriangles = function
-	for pos in range(1, 55)
-		p = pieces[pos]
-		if not p then continue
-		// Look for triangles down (SE and SW) from here that matches p.
-		posA = pos; posB = pos; closed = false
-		while true
-			posA = boardUtil.neighbor[posA][dir.SW]
-			posB = boardUtil.neighbor[posB][dir.SE]
-			if not posA or not posB then break
-			if not closed then
-				for p2 in range(posA, posB)
-					if pieces[p2] != 0 and pieces[p2] != p then closed = true
-				end for
-			end if
-			if pieces[posA] == p and pieces[posB] == p then
-				if closed then triList = closedTris else triList = openTris
-				setTriangle triList, posA, posB, pos, p
-			end if
-		end while
-		// Now do it again, looking for upward (NE-NW) triangles.
-		posA = pos; posB = pos; closed =  false
-		while true
-			posA = boardUtil.neighbor[posA][dir.NW]
-			posB = boardUtil.neighbor[posB][dir.NE]
-			if not posA or not posB then break
-			if not closed then
-				for p2 in range(posA, posB)
-					if pieces[p2] != 0 and pieces[p2] != p then closed = true
-				end for
-			end if
-			if pieces[posA] == p and pieces[posB] == p then
-				if closed then triList = closedTris else triList = openTris
-				setTriangle triList, posA, posB, pos, p
-			end if
-		end while		
+// find all triangles and load (display) them on the board
+findTriangles = function(updateDisplay = true)
+	for tri in boardUtil.findTriangles
+		if tri.closed then triList = closedTris else triList = openTris
+		setTriangle triList, tri.points, tri.player, updateDisplay
 	end for
 end function
 
 loadState = function(stateStr)
-	while sprites; sprites.pop; end while
+	clearStones
 	for pos in range(1, 55)
 		pieces[pos] = stateStr[pos].val
 		if pieces[pos] then addStone pos, pieces[pos]
@@ -190,11 +154,12 @@ printHelp = function(s, textColor)
 	smallFont.printCentered s, 480, 4, 1, textColor
 end function
 
+captureBtn = new textUtil.DialogButton
+captureBtn.caption = "Capture"
+captureBtn.y = 25
+captureBtn.x = 42
+
 showCaptureButton = function
-	outer.captureBtn = new textUtil.DialogButton
-	captureBtn.caption = "Capture"
-	captureBtn.y = 25
-	captureBtn.x = 42
 	text.color = StoneSprite.tints[player]
 	captureBtn.draw
 	captureBtn.visible = true
@@ -206,21 +171,88 @@ hideCaptureButton = function
 	captureBtn.visible = false
 end function
 
-doCapture = function
-	d = textUtil.Dialog.make("Not Implemented", 
-	  "Sorry.  This feature is coming soon!")
-	d.okBtn.caption = "Rats!"
-	d.show
+// cornerPoints: list of three position indexes defining a closed triangle
+captureGroup = function(cornerPoints)
+	allPoints = boardUtil.allPointsInTriangle(cornerPoints)
+	for pos in allPoints
+		p = pieces[pos]
+		// ToDo: if nonempty, add this to the player's count
+		pieces[pos] = 0
+		sp = stoneAtIndex.get(pos)
+		if sp then sprites.removeVal sp
+	end for
+	oldClosed = closedTris[:]; globals.closedTris = [0]*56
+	oldOpen   = openTris[:];   globals.openTris   = [0]*56
+	findTriangles false
+	for i in range(1, 55)
+		if closedTris[i] != oldClosed[i] or openTris[i] != oldOpen[i] then
+			vis.updateCell i
+		end if
+	end for
 end function
 
-players = [P1, P2]
+doCapture = function
+	captures = boardUtil.findTriangles(player, true)
+	selectionDotCount = 0
+	while captures.len > 1
+		printHelp "Click a corner of the triangle to capture."
+		while not mouse.button and not key.pressed("escape")
+			yield
+		end while
+		pos = 0
+		if mouse.button then
+			pos = boardUtil.indexAtXY(mouse)
+			if pieces[pos] != player then pos = 0
+			while mouse.button; yield; end while
+		end if
+		if pos == 0 then	// cancel
+			for i in range(1, selectionDotCount, 1); sprites.pop; end for
+			showTurnHelp
+			return
+		end if
+		// Filter out any potential captures that don't
+		// include the clicked position.
+		for i in range(captures.len-1, 0)
+			if not captures[i].points.contains(pos) then captures.remove i
+		end for
+		if captures.len > 1 then
+			sp = new Sprite
+			sp.image = stoneSelectedImg
+			sp.x = boardUtil.xForIndex(pos)
+			sp.y = boardUtil.yForIndex(pos)
+			sprites.push sp
+			selectionDotCount += 1
+		end if
+	end while
+	for i in range(1, selectionDotCount, 1); sprites.pop; end for
+	captureGroup captures[0].points
+	nextPlayer
+end function
+
+showTurnHelp = function
+	help = playerNames[player] + "'s turn.  "
+	captures = boardUtil.findTriangles(player, true)
+	if captures then
+		captureBtn.caption = "Capture" + "…" * (captures.len > 1)
+		help += "Place stone, or click the Capture button."
+		showCaptureButton
+	else
+		help += "Click an empty node to place a stone."	  
+		hideCaptureButton
+	end if
+	printHelp help
+end function
+
+if not globals.hasIndex("qtyPlayers") then qtyPlayers = 2
+players = [P1, P2, P3, P4][:qtyPlayers]
+
 nextPlayer = function
 	i = players.indexOf(player)
 	i = (i + 1) % players.len
 	outer.player = players[i]
-	printHelp playerNames[player] + "'s turn.  Click an empty node to place a stone."	  
-	showCaptureButton
+	showTurnHelp
 end function
+
 player = players[-1]
 nextPlayer
 

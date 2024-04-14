@@ -42,6 +42,11 @@ xForIndex = function(idx)
 	return midX + (colRow[0] - 3 - 0.5 * (colRow[1] % 2)) * xSpacing
 end function
 
+indexAtXY = function(xyMap)
+	col = colAtXY(xyMap)
+	row = rowAtXY(xyMap)
+	return colRowToIndex.get([col, row], 0)
+end function
 
 // List providing the column range for each row.
 rowColRange = [
@@ -73,35 +78,103 @@ for row in range(0, 8)
 end for
 
 // Directions from one point on the board towards neighboring points.
-globals.dir = {}
-dir.E = 0
-dir.NE = 1
-dir.NW = 2
-dir.W = 3
-dir.SW = 4
-dir.SE = 5
+globals.dirs = {}
+dirs.E = 0
+dirs.NE = 1
+dirs.NW = 2
+dirs.W = 3
+dirs.SW = 4
+dirs.SE = 5
 
 // A table that maps any position to the neighboring positions.
 // So for example, the neighbor to the West of position 28 is:
-//		neighbor[28][dir.W]
+//		neighbor[28][dirs.W]
 neighbor = list.init2d(56, 6, 0)
 for pos in positions
 	colRow = indexToColRow[pos]; col = colRow[0]; row = colRow[1]
-	if inBounds(col+1, row) then neighbor[pos][dir.E] = pos + 1
-	if inBounds(col-1, row) then neighbor[pos][dir.W] = pos - 1
+	if inBounds(col+1, row) then neighbor[pos][dirs.E] = pos + 1
+	if inBounds(col-1, row) then neighbor[pos][dirs.W] = pos - 1
 	if row % 2 == 0 then		// even row
-		neighbor[pos][dir.NE] = colRowToIndex.get([col+1, row-1], 0)
-		neighbor[pos][dir.NW] = colRowToIndex.get([col, row-1], 0)
-		neighbor[pos][dir.SW] = colRowToIndex.get([col, row+1], 0)
-		neighbor[pos][dir.SE] = colRowToIndex.get([col+1, row+1], 0)
+		neighbor[pos][dirs.NE] = colRowToIndex.get([col+1, row-1], 0)
+		neighbor[pos][dirs.NW] = colRowToIndex.get([col, row-1], 0)
+		neighbor[pos][dirs.SW] = colRowToIndex.get([col, row+1], 0)
+		neighbor[pos][dirs.SE] = colRowToIndex.get([col+1, row+1], 0)
 	else						// odd row
-		neighbor[pos][dir.NE] = colRowToIndex.get([col, row-1], 0)
-		neighbor[pos][dir.NW] = colRowToIndex.get([col-1, row-1], 0)
-		neighbor[pos][dir.SW] = colRowToIndex.get([col-1, row+1], 0)
-		neighbor[pos][dir.SE] = colRowToIndex.get([col, row+1], 0)
+		neighbor[pos][dirs.NE] = colRowToIndex.get([col, row-1], 0)
+		neighbor[pos][dirs.NW] = colRowToIndex.get([col-1, row-1], 0)
+		neighbor[pos][dirs.SW] = colRowToIndex.get([col-1, row+1], 0)
+		neighbor[pos][dirs.SE] = colRowToIndex.get([col, row+1], 0)
 	end if
-	
 end for
+
+// Return all the position indexes in the given triangle.
+// points: list of position indexes, in order left, right, middle
+allPointsInTriangle = function(points)
+	posA = points[0]; posB = points[1]; posC = points[2]
+	if indexToColRow[points[0]][1] < indexToColRow[posC][1] then
+		dirLeft = dirs.NW
+		dirRight = dirs.NE
+	else
+		dirLeft = dirs.SW
+		dirRight = dirs.SE
+	end if
+	result = [posC]
+	posA = posC; posB = posC
+	while true
+		posA = boardUtil.neighbor[posA][dirLeft]
+		posB = boardUtil.neighbor[posB][dirRight]
+		result += range(posA, posB)
+		if posA == points[0] then break
+	end while
+	return result
+end function
+
+// Return a list of triangles for one player, or all players.
+// Each entry in the list is a little map with:
+//		player: P1, P2, P3, or P4
+//		closed: true or false
+//		points: list of position indexes, in order left, right, middle
+findTriangles = function(player=null, closedOnly=false)
+	result = []
+	for pos in range(1, 55)
+		p = pieces[pos]
+		if not p then continue
+		if player and p != player then continue
+		// Look for triangles down (SE and SW) from here that matches p.
+		posA = pos; posB = pos; closed = false
+		while true
+			posA = boardUtil.neighbor[posA][dirs.SW]
+			posB = boardUtil.neighbor[posB][dirs.SE]
+			if not posA or not posB then break
+			if not closed then
+				for p2 in range(posA, posB)
+					if pieces[p2] != 0 and pieces[p2] != p then closed = true
+				end for
+			end if
+			if pieces[posA] == p and pieces[posB] == p and (closed or not closedOnly) then
+				result.push {"player":p, "closed":closed, 
+				  "points": [posA, posB, pos]}
+			end if
+		end while
+		// Now do it again, looking for upward (NE-NW) triangles.
+		posA = pos; posB = pos; closed =  false
+		while true
+			posA = boardUtil.neighbor[posA][dirs.NW]
+			posB = boardUtil.neighbor[posB][dirs.NE]
+			if not posA or not posB then break
+			if not closed then
+				for p2 in range(posA, posB)
+					if pieces[p2] != 0 and pieces[p2] != p then closed = true
+				end for
+			end if
+			if pieces[posA] == p and pieces[posB] == p and (closed or not closedOnly) then
+				result.push {"player":p, "closed":closed, 
+				  "points": [posA, posB, pos]}
+			end if
+		end while		
+	end for
+	return result
+end function
 
 runUnitTests = function
 	clear
@@ -113,15 +186,15 @@ runUnitTests = function
 		end if
 	end function
 
-	assertEqual neighbor[28][dir.E], 29
-	assertEqual neighbor[28][dir.NE], 21
-	assertEqual neighbor[28][dir.NW], 20
-	assertEqual neighbor[28][dir.W], 27
-	assertEqual neighbor[28][dir.SW], 35
-	assertEqual neighbor[28][dir.SE], 36
-	assertEqual neighbor[8][dir.NE], 0
-	assertEqual neighbor[8][dir.NW], 3
-	assertEqual neighbor[8][dir.SE], 15
+	assertEqual neighbor[28][dirs.E], 29
+	assertEqual neighbor[28][dirs.NE], 21
+	assertEqual neighbor[28][dirs.NW], 20
+	assertEqual neighbor[28][dirs.W], 27
+	assertEqual neighbor[28][dirs.SW], 35
+	assertEqual neighbor[28][dirs.SE], 36
+	assertEqual neighbor[8][dirs.NE], 0
+	assertEqual neighbor[8][dirs.NW], 3
+	assertEqual neighbor[8][dirs.SE], 15
 
 	if errorCount == 0 then
 		print "All tests passed.  Hooray!"

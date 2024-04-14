@@ -15,3 +15,18 @@ Time to change that!
 
 I'm recreating it in [Mini Micro](https://miniscript.org/MiniMicro/), a free retro-style virtual computer.  It's got the graphics and sound capabilities to truly bring this game to life.
 
+## Status
+
+The game is just (barely) playable for 2-4 local (human) players.  However, it does not count your lost pieces, or enforce a number of other rules.
+
+### To-Do List
+
+- Disallow two stones of the same color to be connected by double lines
+- Don't count a minimal triangle (i.e. three neighboring points) as a triangle
+- Start each player with a supply of 14 stones, shown around the board
+- Skip a player when they have no stone or capture to play
+- Declare a winner when only one player can move
+- Add pretty AV effects when creating or capturing triangles
+- Make background stars twinkle/move
+- Add AI
+- Add in-game menus to configure/reset the game
