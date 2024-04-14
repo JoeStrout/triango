@@ -6,6 +6,8 @@ import "textUtil"
 import "bmfFonts"
 import "boardUtil"
 import "background"
+import "sounds"
+import "bucket"
 
 boardImg = file.loadImage("pics/triango-board.png")
 stoneImg = file.loadImage("pics/go-stone.png")
@@ -59,22 +61,26 @@ end function
 // Set up the displays.
 clear
 background.setup
+
 triVisDisp = []
 display(6).mode = displayMode.pixel
 triVisDisp.push display(6)
 display(5).mode = displayMode.pixel
 triVisDisp.push display(5)
 for g in triVisDisp; g.clear color.clear; end for
-display(2).mode = displayMode.pixel
-boardDisp = display(2)
+
+display(4).mode = displayMode.pixel
+boardDisp = display(4)
 boardDisp.clear color.clear
 boardDisp.drawImage boardImg, 
       boardUtil.midX - boardImg.width/2, boardUtil.midY - boardImg.height/2
-display(1).mode = displayMode.sprite
-spriteDisp = display(1)
+
+display(2).mode = displayMode.sprite
+spriteDisp = display(2)
 spriteDisp.clear; sprites = spriteDisp.sprites
-display(0).mode = displayMode.text
-text = display(0)
+
+display(1).mode = displayMode.text
+text = display(1)
 text.clear
 
 for pos in boardUtil.positions
@@ -95,11 +101,7 @@ stoneAtIndex = {}	// key: position index; value: StoneSprite
 
 addStone = function(posIndex, player=null)
 	if player == null then player = globals.player
-	sp = new StoneSprite
-	sp.tint = StoneSprite.tints[player]
-	sp.x = boardUtil.xForIndex(posIndex)
-	sp.y = boardUtil.yForIndex(posIndex)
-	sprites.push sp
+	sp = buckets[player].playStone(posIndex)
 	stoneAtIndex[posIndex] = sp
 	pieces[posIndex] = player
 end function
@@ -171,15 +173,17 @@ hideCaptureButton = function
 	captureBtn.visible = false
 end function
 
-// cornerPoints: list of three position indexes defining a closed triangle
 captureGroup = function(cornerPoints)
+	text.clear
 	allPoints = boardUtil.allPointsInTriangle(cornerPoints)
 	for pos in allPoints
 		p = pieces[pos]
-		// ToDo: if nonempty, add this to the player's count
 		pieces[pos] = 0
 		sp = stoneAtIndex.get(pos)
-		if sp then sprites.removeVal sp
+		if sp then
+			buckets[player].holdStone sp, p == player
+			stoneAtIndex[pos] = null
+		end if
 	end for
 	oldClosed = closedTris[:]; globals.closedTris = [0]*56
 	oldOpen   = openTris[:];   globals.openTris   = [0]*56
@@ -246,6 +250,20 @@ end function
 if not globals.hasIndex("qtyPlayers") then qtyPlayers = 2
 players = [P1, P2, P3, P4][:qtyPlayers]
 
+buckets = {}	// key: P1-P4; value: Bucket
+for i in players.indexes
+	p = players[i]
+	buckets[p] = new Bucket
+	buckets[p].player = p
+	buckets[p].left = [2, 958-Bucket.width, 958-Bucket.width, 2][i]
+	if qtyPlayers > 2 then
+		buckets[p].bottom = [320, 320, 2, 2][i]
+	else
+		buckets[p].bottom = 170
+	end if
+	buckets[p].init
+end for
+
 nextPlayer = function
 	i = players.indexOf(player)
 	i = (i + 1) % players.len
@@ -257,19 +275,22 @@ player = players[-1]
 nextPlayer
 
 while true
-	row = boardUtil.rowAtXY(mouse); col = boardUtil.colAtXY(mouse)
-	idx = boardUtil.colRowToIndex.get([col,row], null)
-	text.row = 25
-	if idx == null then
-		print " " * 25
-	else
-		print idx + " (" + col + "," + row + ")      "
-	end if
+	idx = boardUtil.indexAtXY(mouse)
+//	text.row = 25
+//	if idx == null then
+//		print " " * 25
+//	else
+//		print idx + " (" + col + "," + row + ")      "
+//	end if
 	if mouse.button then
-		if boardUtil.inBounds(col, row) and pieces[idx] == 0 then
-			addStone idx
-			findTriangles
-			nextPlayer
+		if boardUtil.isEmptySpot(idx) then
+			if boardUtil.violatesEdgeRule(idx, player) or buckets[player].isEmpty then
+				sounds.playBadMove
+			else
+				addStone idx
+				findTriangles
+				nextPlayer
+			end if
 		else if captureBtn.visible and captureBtn.contains(mouse) then
 			if captureBtn.trackHit then doCapture
 		end if

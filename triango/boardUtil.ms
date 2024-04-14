@@ -140,40 +140,59 @@ findTriangles = function(player=null, closedOnly=false)
 		p = pieces[pos]
 		if not p then continue
 		if player and p != player then continue
-		// Look for triangles down (SE and SW) from here that matches p.
-		posA = pos; posB = pos; closed = false
-		while true
-			posA = boardUtil.neighbor[posA][dirs.SW]
-			posB = boardUtil.neighbor[posB][dirs.SE]
-			if not posA or not posB then break
-			if not closed then
-				for p2 in range(posA, posB)
-					if pieces[p2] != 0 and pieces[p2] != p then closed = true
-				end for
-			end if
-			if pieces[posA] == p and pieces[posB] == p and (closed or not closedOnly) then
-				result.push {"player":p, "closed":closed, 
-				  "points": [posA, posB, pos]}
-			end if
-		end while
-		// Now do it again, looking for upward (NE-NW) triangles.
-		posA = pos; posB = pos; closed =  false
-		while true
-			posA = boardUtil.neighbor[posA][dirs.NW]
-			posB = boardUtil.neighbor[posB][dirs.NE]
-			if not posA or not posB then break
-			if not closed then
-				for p2 in range(posA, posB)
-					if pieces[p2] != 0 and pieces[p2] != p then closed = true
-				end for
-			end if
-			if pieces[posA] == p and pieces[posB] == p and (closed or not closedOnly) then
-				result.push {"player":p, "closed":closed, 
-				  "points": [posA, posB, pos]}
-			end if
-		end while		
+		for stepDirs in [ [dirs.SW, dirs.SE], [dirs.NW, dirs.NE] ]
+			// Look for triangles extending from here that match p.
+			posA = pos; posB = pos; closed = false
+			tooSmall = true
+			while true
+				posA = boardUtil.neighbor[posA][stepDirs[0]]
+				posB = boardUtil.neighbor[posB][stepDirs[1]]
+				if not posA or not posB then break
+				if not closed then
+					for p2 in range(posA, posB)
+						if pieces[p2] != 0 and pieces[p2] != p then closed = true
+					end for
+				end if
+				if pieces[posA] == p and pieces[posB] == p and not tooSmall and
+				  (closed or not closedOnly) then
+					result.push {"player":p, "closed":closed, 
+					  "points": [posA, posB, pos]}
+				end if
+				tooSmall = false
+			end while
+		end for
 	end for
 	return result
+end function
+
+isEmptySpot = function(posIndex)
+	if posIndex == 0 or posIndex == null then return false
+	if pieces[posIndex] != 0 then return false
+	return true
+end function
+
+_violatesEdge = function(posIndex, player, edgePoints)
+	i = edgePoints.indexOf(posIndex)
+	if i == 1 then
+		return pieces[edgePoints[0]] == player or
+		       pieces[edgePoints[2]] == player
+	else if i == 0 or i == 2 then
+		return pieces[edgePoints[1]] == player
+	end if
+	return false
+end function
+
+// Return whether playing at posIndex (by player) would
+// violate the rule that we can't have two adjacent pieces
+// of the same player on the outer edge (connected by double
+// lines on the board diagram).
+violatesEdgeRule = function(posIndex, player)
+	return _violatesEdge(posIndex, player, [1, 2, 3]) or
+	       _violatesEdge(posIndex, player, [4, 10, 17]) or
+	       _violatesEdge(posIndex, player, [9, 16, 24]) or
+	       _violatesEdge(posIndex, player, [32, 40, 47]) or
+	       _violatesEdge(posIndex, player, [39, 46, 52]) or
+	       _violatesEdge(posIndex, player, [53, 54, 55])
 end function
 
 runUnitTests = function
