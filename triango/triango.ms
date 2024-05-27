@@ -8,6 +8,7 @@ import "boardUtil"
 import "background"
 import "sounds"
 import "bucket"
+import "ai"
 
 boardImg = file.loadImage("pics/triango-board.png")
 stoneImg = file.loadImage("pics/go-stone.png")
@@ -148,8 +149,6 @@ loadState = function(stateStr)
 	findTriangles
 end function
 
-//loadState "00800400000000000008008000010010400040000202000000100202"
-
 printHelp = function(s, textColor)
 	if textColor == null then textColor = StoneSprite.tints[player]
 	gfx.fillRect 0, 0, 960, 20, "#00000088"
@@ -235,14 +234,18 @@ end function
 
 showTurnHelp = function
 	help = playerNames[player] + "'s turn.  "
-	captures = boardUtil.findTriangles(player, true)
-	if captures then
-		captureBtn.caption = "Capture" + "…" * (captures.len > 1)
-		help += "Place stone, or click the Capture button."
-		showCaptureButton
+	if player == P2 then
+		help += "Computer is thinking..."
 	else
-		help += "Click an empty node to place a stone."	  
-		hideCaptureButton
+		captures = boardUtil.findTriangles(player, true)
+		if captures then
+			captureBtn.caption = "Capture" + "…" * (captures.len > 1)
+			help += "Place stone, or click the Capture button."
+			showCaptureButton
+		else
+			help += "Click an empty node to place a stone."	  
+			hideCaptureButton
+		end if
 	end if
 	printHelp help
 end function
@@ -274,33 +277,60 @@ end function
 player = players[-1]
 nextPlayer
 
-while true
-	idx = boardUtil.indexAtXY(mouse)
-//	text.row = 25
-//	if idx == null then
-//		print " " * 25
-//	else
-//		print idx + " (" + col + "," + row + ")      "
-//	end if
-	if mouse.button then
-		if boardUtil.isEmptySpot(idx) then
-			if boardUtil.violatesEdgeRule(idx, player) or buckets[player].isEmpty then
-				sounds.playBadMove
-			else
-				addStone idx
-				findTriangles
-				nextPlayer
+// HACK for debugging
+addStone 28; nextPlayer
+addStone 53; nextPlayer
+addStone 8; nextPlayer
+addStone 43; nextPlayer
+
+doHumanMove = function
+	while true
+		idx = boardUtil.indexAtXY(mouse)
+		//	text.row = 25
+		//	if idx == null then
+		//		print " " * 25
+		//	else
+		//		print idx + " (" + col + "," + row + ")      "
+		//	end if
+		if mouse.button then
+			if boardUtil.isEmptySpot(idx) then
+				if boardUtil.violatesEdgeRule(idx, player) or buckets[player].isEmpty then
+					sounds.playBadMove
+				else
+					addStone idx
+					findTriangles
+					return
+				end if
+			else if captureBtn.visible and captureBtn.contains(mouse) then
+				if captureBtn.trackHit then
+					doCapture
+					return
+				end if
 			end if
-		else if captureBtn.visible and captureBtn.contains(mouse) then
-			if captureBtn.trackHit then doCapture
+			while mouse.button; yield; end while
 		end if
-		while mouse.button; yield; end while
+		yield
+	end while
+end function
+
+doAIMove = function
+	ai = new ai.BoardNode
+	ai.initFromGameState
+	move = ai.pickMove
+	if move == "c" then
+		doCapture
+	else
+		addStone move
+		findTriangles
 	end if
-	if key.available then
-		k = key.get
-		if k == char(27) then break
-		if k >= "1" and k <= "4" then player = [P1, P2, P3, P4][val(k) - 1]
-		text.row = 24; print player
+end function
+
+// Main loop
+while true
+	if player == players[0] then
+		doHumanMove
+	else
+		doAIMove
 	end if
-	yield
+	nextPlayer
 end while

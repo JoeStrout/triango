@@ -129,37 +129,66 @@ allPointsInTriangle = function(points)
 	return result
 end function
 
+// Return a list of triangles with one point at pos, and extending
+// in the given stepDirs.
+//		pos: board position with a piece on it
+//		stepDirs: pair of directions the triangle extends from there
+//		closedOnly: true or false, only report closed triangles
+//		pieces: list or string defining the piece at each board position
+findTrisAtPosInDir = function(pos, stepDirs, closedOnly, pieces)
+	result = []
+	p = pieces[pos]
+	empty = pieces[0]
+	posA = pos; posB = pos; closed = false
+	tooSmall = true
+	while true
+		posA = boardUtil.neighbor[posA][stepDirs[0]]
+		posB = boardUtil.neighbor[posB][stepDirs[1]]
+		if not posA or not posB then break
+		if not closed then
+			for p2 in range(posA, posB)
+				if pieces[p2] != empty and pieces[p2] != p then closed = true
+			end for
+		end if
+		if pieces[posA] == p and pieces[posB] == p and not tooSmall and
+		  (closed or not closedOnly) then
+			result.push {"player":p, "closed":closed, 
+			  "points": [posA, posB, pos]}
+		end if
+		tooSmall = false
+	end while
+	return result
+end function
+
+// Return a list of all triangles with one corner at pos.
+findAllTrisAtPos = function(pos, pieces)
+	result = []
+	result =  findTrisAtPosInDir(pos, [dirs.SW, dirs.SE], false, pieces)
+	result += findTrisAtPosInDir(pos, [dirs.SE, dirs.E], false, pieces)
+	result += findTrisAtPosInDir(pos, [dirs.E,  dirs.NE], false, pieces)
+	result += findTrisAtPosInDir(pos, [dirs.NE, dirs.NW], false, pieces)
+	result += findTrisAtPosInDir(pos, [dirs.NW, dirs.W], false, pieces)
+	result += findTrisAtPosInDir(pos, [dirs.W,  dirs.SW], false, pieces)
+	return result
+end function
+
 // Return a list of triangles for one player, or all players.
 // Each entry in the list is a little map with:
 //		player: P1, P2, P3, or P4
-//		closed: true or false
-//		points: list of position indexes, in order left, right, middle
-findTriangles = function(player=null, closedOnly=false)
+//		closedOnly: true or false
+//		inNode: an ai.BoardNode, or null to use game state
+findTriangles = function(player=null, closedOnly=false, inNode=null)
 	result = []
+	if inNode != null then
+		pieces = inNode.board
+	end if
 	for pos in range(1, 55)
 		p = pieces[pos]
-		if not p then continue
+		if not p or p == "0" then continue
 		if player and p != player then continue
 		for stepDirs in [ [dirs.SW, dirs.SE], [dirs.NW, dirs.NE] ]
 			// Look for triangles extending from here that match p.
-			posA = pos; posB = pos; closed = false
-			tooSmall = true
-			while true
-				posA = boardUtil.neighbor[posA][stepDirs[0]]
-				posB = boardUtil.neighbor[posB][stepDirs[1]]
-				if not posA or not posB then break
-				if not closed then
-					for p2 in range(posA, posB)
-						if pieces[p2] != 0 and pieces[p2] != p then closed = true
-					end for
-				end if
-				if pieces[posA] == p and pieces[posB] == p and not tooSmall and
-				  (closed or not closedOnly) then
-					result.push {"player":p, "closed":closed, 
-					  "points": [posA, posB, pos]}
-				end if
-				tooSmall = false
-			end while
+			result += findTrisAtPosInDir(pos, stepDirs, closedOnly, pieces)
 		end for
 	end for
 	return result
