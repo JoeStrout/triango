@@ -8,6 +8,9 @@ point has up to six neighbors (E, NE, NW, W, SW, SE).
 import os
 import sys
 
+if sys.version_info < (3, 10):
+    raise RuntimeError("TrianGO requires Python 3.10 or newer")
+
 # ---------------------------------------------------------------------------
 # Players / point contents
 
@@ -81,15 +84,31 @@ for _a, _b, _c in PERIMETERS:
     PERIMETER_CONFLICT[_a] = PERIMETER_CONFLICT[_c] = BIT[_b]
     PERIMETER_CONFLICT[_b] = BIT[_a] | BIT[_c]
 
-try:
-    popcount = int.bit_count
-except AttributeError:  # Python < 3.10
-    def popcount(x):
-        return bin(x).count("1")
+popcount = int.bit_count
+
+
+ALL_POINTS_MASK = sum(BIT[1:])
+
+# (center bit, ends mask) for each perimeter.
+PERIMETER_BITS = [(BIT[b], BIT[a] | BIT[c]) for a, b, c in PERIMETERS]
+
+# _BYTE_POINTS[k][v]: the points whose bits are set in byte k of a mask, if
+# that byte's value is v.
+_BYTE_POINTS = [[tuple(8 * k + j for j in range(8) if v >> j & 1) for v in range(256)]
+                for k in range((NUM_POINTS + 8) // 8)]
 
 
 def mask_to_points(mask):
-    return [i for i in range(1, NUM_POINTS + 1) if mask & BIT[i]]
+    """The point numbers in a bitmask, in increasing order."""
+    result = []
+    k = 0
+    while mask:
+        v = mask & 255
+        if v:
+            result.extend(_BYTE_POINTS[k][v])
+        mask >>= 8
+        k += 1
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -135,6 +154,71 @@ TRIANGLE_BY_CORNERS = {t.corners: t for t in TRIANGLES}
 # TRIANGLES_AT_CORNER[i]: triangles having point i as a corner.
 TRIANGLES_AT_CORNER = [[t for t in TRIANGLES if i in t.corners]
                        for i in range(NUM_POINTS + 1)]
+
+# ---------------------------------------------------------------------------
+# Hex-grid coordinates, and a 9x9 grid embedding for convolutional networks.
+#
+# AXIAL[i] = (q, r) with the center point 28 at (0, 0); r is the row offset.
+# The six neighbors of (q, r) are (q+-1, r), (q, r+-1), (q+1, r-1), and
+# (q-1, r+1).  GRID_RC[i] = (grid row, grid col) shifts these to a 9x9 grid
+# in which neighboring points are always adjacent cells (though not every
+# pair of adjacent cells are neighbors).  55 of the 81 cells are on the board.
+
+_CX, _CY = HX[28], ROW_COL[28][0]
+AXIAL = [None] + [((HX[i] - _CX - (ROW_COL[i][0] - _CY)) // 2, ROW_COL[i][0] - _CY)
+                  for i in range(1, NUM_POINTS + 1)]
+_axial_index = {AXIAL[i]: i for i in range(1, NUM_POINTS + 1)}
+_q0 = min(q for q, _ in AXIAL[1:])
+_r0 = min(r for _, r in AXIAL[1:])
+GRID_RC = [None] + [(r - _r0, q - _q0) for q, r in AXIAL[1:]]
+GRID_ROWS = 1 + max(rc[0] for rc in GRID_RC[1:])
+GRID_COLS = 1 + max(rc[1] for rc in GRID_RC[1:])
+assert (GRID_ROWS, GRID_COLS) == (9, 9)
+
+# ---------------------------------------------------------------------------
+# Symmetries.  The board has the full symmetry of a regular hexagon: six
+# rotations about point 28 and six reflections.
+#
+# POINT_PERM[s][i] is where point i goes under symmetry s (POINT_PERM[s][0]
+# is 0).  s = 0 is the identity; s = 1-5 rotate by 60*s degrees; s = 6-11
+# reflect, then rotate by 60*(s-6) degrees.  TRIANGLE_PERM[s][k] is the
+# index of the triangle that TRIANGLES[k] maps to.
+
+NUM_SYMMETRIES = 12
+SYMMETRY_NAMES = ([f"rot{60 * k}" for k in range(6)] +
+                  [f"mirror+rot{60 * k}" for k in range(6)])
+
+
+def _transform_axial(s, q, r):
+    x, z = q, r         # cube coordinates (x, y, z) with x + y + z = 0
+    y = -x - z
+    if s >= 6:
+        y, z = z, y     # reflect
+    for _ in range(s % 6):
+        x, y, z = -z, -x, -y   # rotate 60 degrees
+    return (x, z)
+
+
+POINT_PERM = [[0] + [_axial_index[_transform_axial(s, *AXIAL[i])]
+                     for i in range(1, NUM_POINTS + 1)]
+              for s in range(NUM_SYMMETRIES)]
+TRIANGLE_PERM = [[TRIANGLE_BY_CORNERS[tuple(sorted(perm[c] for c in t.corners))].index
+                  for t in TRIANGLES]
+                 for perm in POINT_PERM]
+# INVERSE_SYMMETRY[s]: the symmetry that undoes s.
+INVERSE_SYMMETRY = [next(s2 for s2 in range(NUM_SYMMETRIES)
+                         if all(POINT_PERM[s2][POINT_PERM[s][i]] == i
+                                for i in range(NUM_POINTS + 1)))
+                    for s in range(NUM_SYMMETRIES)]
+
+
+def transform_mask(mask, s):
+    """Apply symmetry s to a bitmask of points."""
+    perm = POINT_PERM[s]
+    result = 0
+    for i in mask_to_points(mask):
+        result |= BIT[perm[i]]
+    return result
 
 # ---------------------------------------------------------------------------
 # Board state

@@ -5,11 +5,12 @@ import random
 import unittest
 
 from board import (
-    BIT, BLUE, EMPTY, GREEN, NEIGHBOR, NUM_POINTS, PERIMETER_CONFLICT,
-    PERIMETER_MASK, PLAYERS, RED, STONES_PER_PLAYER, TRIANGLE_BY_CORNERS,
-    TRIANGLES, WHITE, Board, popcount,
+    BIT, BLUE, EMPTY, GREEN, INVERSE_SYMMETRY, NEIGHBOR, NUM_POINTS,
+    NUM_SYMMETRIES, PERIMETER_CONFLICT, PERIMETER_MASK, PERIMETERS, PLAYERS,
+    POINT_PERM, RED, STONES_PER_PLAYER, TRIANGLE_BY_CORNERS, TRIANGLE_PERM,
+    TRIANGLES, WHITE, Board, mask_to_points, popcount,
 )
-from game import GameState, IllegalMove, capture_action, is_capture
+from game import ACTION_PERM, NUM_ACTIONS, GameState, IllegalMove, capture_action, is_capture
 
 R, B, G, W = RED, BLUE, GREEN, WHITE
 
@@ -182,6 +183,69 @@ class TurnAndEndTests(unittest.TestCase):
         self.assertEqual(s.winner, R)
 
 
+def state_key(s):
+    return (s.board.to_string(), s.hand, s.captured, s.lost, s.to_move,
+            s.winner, s.passed, s.num_moves)
+
+
+class SymmetryTests(unittest.TestCase):
+    def test_twelve_symmetries_form_a_group(self):
+        perms = {tuple(p) for p in POINT_PERM}
+        self.assertEqual(len(perms), NUM_SYMMETRIES)
+        self.assertEqual(POINT_PERM[0], list(range(NUM_POINTS + 1)))
+        for s, perm in enumerate(POINT_PERM):
+            self.assertEqual(sorted(perm), list(range(NUM_POINTS + 1)))
+            self.assertEqual(perm[28], 28)
+            inv = POINT_PERM[INVERSE_SYMMETRY[s]]
+            self.assertTrue(all(inv[perm[i]] == i for i in range(NUM_POINTS + 1)))
+            for other in POINT_PERM:
+                self.assertIn(tuple(other[perm[i]] for i in range(NUM_POINTS + 1)), perms)
+        # s=1 is a rotation of order 6.
+        p = list(range(NUM_POINTS + 1))
+        for k in range(1, 7):
+            p = [POINT_PERM[1][i] for i in p]
+            self.assertEqual(p == list(range(NUM_POINTS + 1)), k == 6)
+
+    def test_symmetries_preserve_board_structure(self):
+        edges = {frozenset((i, j)) for i in range(1, NUM_POINTS + 1) for j in NEIGHBOR[i] if j}
+        double = set()
+        for a, b, c in PERIMETERS:
+            double |= {frozenset((a, b)), frozenset((b, c))}
+        perims = {(frozenset((a, c)), b) for a, b, c in PERIMETERS}
+        for s, perm in enumerate(POINT_PERM):
+            image = lambda pts: frozenset(perm[i] for i in pts)
+            self.assertEqual({image(e) for e in edges}, edges)
+            self.assertEqual({image(e) for e in double}, double)
+            self.assertEqual({(image(ends), perm[c]) for ends, c in perims}, perims)
+            for t in TRIANGLES:
+                u = TRIANGLES[TRIANGLE_PERM[s][t.index]]
+                self.assertEqual(set(u.points), image(t.points))
+                self.assertEqual(set(u.corners), image(t.corners))
+
+    def test_action_perm(self):
+        for s in range(NUM_SYMMETRIES):
+            self.assertEqual(sorted(ACTION_PERM[s]), list(range(NUM_ACTIONS)))
+            self.assertEqual(ACTION_PERM[s][0], 0)
+
+    def test_play_commutes_with_symmetry(self):
+        rng = random.Random(99)
+        for num_players in (2, 3, 4):
+            for _ in range(5):
+                s = GameState(num_players)
+                while not s.is_over:
+                    legal = s.legal_actions()
+                    a = rng.choice(legal)
+                    for sym in range(NUM_SYMMETRIES):
+                        t = s.transformed(sym)
+                        self.assertEqual(sorted(t.legal_actions()),
+                                         sorted(ACTION_PERM[sym][x] for x in legal))
+                        expected = s.copy()
+                        expected.play(a)
+                        t.play(ACTION_PERM[sym][a])
+                        self.assertEqual(state_key(t), state_key(expected.transformed(sym)))
+                    s.play(a)
+
+
 class RandomPlayoutTests(unittest.TestCase):
     def check_invariants(self, s):
         occupied = 0
@@ -200,6 +264,14 @@ class RandomPlayoutTests(unittest.TestCase):
             if not occupied & BIT[i]:
                 self.assertEqual(s.board[i], EMPTY)
         self.assertEqual(sum(s.captured), sum(s.lost))
+        # Incrementally maintained data must match a from-scratch computation.
+        self.assertEqual(s.occ, occupied)
+        for p in s.players:
+            m = s.masks[p]
+            self.assertEqual(list(s.tris[p]),
+                             [t for t in TRIANGLES if m & t.corner_mask == t.corner_mask])
+            self.assertEqual(mask_to_points(m),
+                             [i for i in range(1, NUM_POINTS + 1) if m & BIT[i]])
         if not s.is_over:
             self.assertTrue(s.legal_actions())
 

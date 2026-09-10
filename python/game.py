@@ -22,17 +22,26 @@ Rules (from the manual), as implemented here:
     this means you lose when you cannot move on your turn.
 
 Actions are ints: 1-55 place a stone on that point; CAPTURE_BASE + k
-captures TRIANGLES[k].  (0 is unused.)
+captures TRIANGLES[k].  (0 is unused.)  ACTION_PERM maps actions through
+the board symmetries in board.py.
 """
 
+import operator
+from operator import attrgetter
+
 from board import (
-    BIT, EMPTY, NUM_POINTS, PERIMETER_CONFLICT, PERIMETER_MASK,
-    MAX_PERIMETER_STONES, PLAYERS, PLAYER_NAMES, STONES_PER_PLAYER,
-    TRIANGLES, Board, popcount,
+    ALL_POINTS_MASK, BIT, EMPTY, MAX_PERIMETER_STONES, NUM_POINTS,
+    PERIMETER_BITS, PERIMETER_CONFLICT, PERIMETER_MASK, PLAYER_NAMES, PLAYERS,
+    POINT_PERM, STONES_PER_PLAYER, TRIANGLE_PERM, TRIANGLES,
+    TRIANGLES_AT_CORNER, Board, mask_to_points, popcount, transform_mask,
 )
 
 CAPTURE_BASE = NUM_POINTS + 1
 NUM_ACTIONS = CAPTURE_BASE + len(TRIANGLES)
+
+# ACTION_PERM[s][a]: what action a becomes under board symmetry s.
+ACTION_PERM = [[0] + perm[1:] + [CAPTURE_BASE + k for k in tperm]
+               for perm, tperm in zip(POINT_PERM, TRIANGLE_PERM)]
 
 
 def is_capture(action):
@@ -57,6 +66,9 @@ class IllegalMove(Exception):
     pass
 
 
+_by_index = attrgetter("index")
+
+
 class GameState:
     def __init__(self, num_players=2, first_player=PLAYERS[0]):
         if not 2 <= num_players <= 4:
@@ -65,8 +77,10 @@ class GameState:
         if first_player not in self.players:
             raise ValueError(f"{first_player} is not playing")
         self.board = Board()
+        self.occ = 0               # bitmask of all stones on the board
         # The following are indexed by player (index 0 unused).
         self.masks = [0] * 5       # bitmask of each player's stones on the board
+        self.tris = [()] * 5       # each player's triangles (empty or full), by index
         self.hand = [0] * 5        # stones available to place
         self.captured = [0] * 5    # opponent stones this player has captured
         self.lost = [0] * 5        # this player's stones captured by opponents
@@ -92,7 +106,11 @@ class GameState:
                 raise ValueError(f"{PLAYER_NAMES[p]} is not playing")
             s.board.points[i] = p
             s.masks[p] |= BIT[i]
+            s.occ |= BIT[i]
             s.hand[p] -= 1
+        for p in s.players:
+            own = s.masks[p]
+            s.tris[p] = tuple(t for t in TRIANGLES if own & t.corner_mask == t.corner_mask)
         if hand:
             for p, n in hand.items():
                 s.hand[p] = n
@@ -106,7 +124,9 @@ class GameState:
         s = GameState.__new__(GameState)
         s.players = self.players
         s.board = self.board.copy()
+        s.occ = self.occ
         s.masks = self.masks[:]
+        s.tris = self.tris[:]
         s.hand = self.hand[:]
         s.captured = self.captured[:]
         s.lost = self.lost[:]
@@ -117,6 +137,21 @@ class GameState:
         s.num_moves = self.num_moves
         return s
 
+    def transformed(self, s):
+        """A copy of this state with board symmetry s applied."""
+        t = self.copy()
+        perm = POINT_PERM[s]
+        t.board = Board()
+        for i in range(1, NUM_POINTS + 1):
+            t.board.points[perm[i]] = self.board.points[i]
+        t.occ = transform_mask(self.occ, s)
+        tperm = TRIANGLE_PERM[s]
+        for p in self.players:
+            t.masks[p] = transform_mask(self.masks[p], s)
+            t.tris[p] = tuple(sorted((TRIANGLES[tperm[x.index]] for x in self.tris[p]),
+                                     key=_by_index))
+        return t
+
     # ----- queries -----
 
     @property
@@ -124,10 +159,7 @@ class GameState:
         return self.winner is not None
 
     def occupied_mask(self):
-        m = 0
-        for p in self.players:
-            m |= self.masks[p]
-        return m
+        return self.occ
 
     def stones_on_board(self, player):
         return popcount(self.masks[player])
@@ -138,7 +170,11 @@ class GameState:
     def placement_error(self, point, player=None):
         """Return why player may not place at point, or None if they may."""
         p = self.to_move if player is None else player
-        if not (isinstance(point, int) and 1 <= point <= NUM_POINTS):
+        try:
+            point = operator.index(point)
+        except TypeError:
+            return f"{point!r} is not a point on the board"
+        if not 1 <= point <= NUM_POINTS:
             return f"{point} is not a point on the board"
         if self.board[point] != EMPTY:
             return f"point {point} is occupied"
@@ -151,36 +187,37 @@ class GameState:
                 return f"you already have {MAX_PERIMETER_STONES} stones on perimeters"
         return None
 
-    def legal_placements(self, player=None):
+    def blocked_mask(self, player):
+        """Empty or not, the points where the perimeter rules forbid player to place."""
+        own = self.masks[player]
+        if popcount(own & PERIMETER_MASK) >= MAX_PERIMETER_STONES:
+            return PERIMETER_MASK
+        blocked = 0
+        for center, ends in PERIMETER_BITS:
+            if own & center:
+                blocked |= ends
+            if own & ends:
+                blocked |= center
+        return blocked
+
+    def legal_placement_mask(self, player=None):
         p = self.to_move if player is None else player
         if self.hand[p] == 0:
-            return []
-        own = self.masks[p]
-        occupied = self.occupied_mask()
-        perimeter_full = self.perimeter_count(p) >= MAX_PERIMETER_STONES
-        result = []
-        for i in range(1, NUM_POINTS + 1):
-            b = BIT[i]
-            if occupied & b:
-                continue
-            if PERIMETER_MASK & b and (perimeter_full or own & PERIMETER_CONFLICT[i]):
-                continue
-            result.append(i)
-        return result
+            return 0
+        return ALL_POINTS_MASK & ~self.occ & ~self.blocked_mask(p)
+
+    def legal_placements(self, player=None):
+        return mask_to_points(self.legal_placement_mask(player))
 
     def triangles(self, player):
         """All of player's triangles, as a list of (Triangle, is_full)."""
-        own = self.masks[player]
-        opp = self.occupied_mask() & ~own
-        return [(t, bool(t.mask & opp)) for t in TRIANGLES
-                if own & t.corner_mask == t.corner_mask]
+        opp = self.occ & ~self.masks[player]
+        return [(t, bool(t.mask & opp)) for t in self.tris[player]]
 
     def full_triangles(self, player=None):
         p = self.to_move if player is None else player
-        own = self.masks[p]
-        opp = self.occupied_mask() & ~own
-        return [t for t in TRIANGLES
-                if own & t.corner_mask == t.corner_mask and t.mask & opp]
+        opp = self.occ & ~self.masks[p]
+        return [t for t in self.tris[p] if t.mask & opp]
 
     def legal_actions(self, player=None):
         if self.is_over:
@@ -189,7 +226,13 @@ class GameState:
         return self.legal_placements(p) + [capture_action(t) for t in self.full_triangles(p)]
 
     def has_legal_move(self, player):
-        return bool(self.legal_placements(player) or self.full_triangles(player))
+        if self.legal_placement_mask(player):
+            return True
+        opp = self.occ & ~self.masks[player]
+        for t in self.tris[player]:
+            if t.mask & opp:
+                return True
+        return False
 
     # ----- making moves -----
 
@@ -197,9 +240,13 @@ class GameState:
         """Apply action for the player to move (mutates this state)."""
         if self.is_over:
             raise IllegalMove("the game is over")
+        try:
+            action = operator.index(action)  # accepts numpy ints too
+        except TypeError:
+            raise IllegalMove(f"not an action: {action!r}") from None
         p = self.to_move
         if is_capture(action):
-            if not CAPTURE_BASE <= action < NUM_ACTIONS:
+            if action >= NUM_ACTIONS:
                 raise IllegalMove(f"no such action: {action}")
             tri = action_triangle(action)
             if tri not in self.full_triangles(p):
@@ -209,12 +256,21 @@ class GameState:
             err = self.placement_error(action, p)
             if err:
                 raise IllegalMove(err)
-            self.board.points[action] = p
-            self.masks[p] |= BIT[action]
-            self.hand[p] -= 1
+            self._place(p, action)
         self.last_mover = p
         self.num_moves += 1
         self._advance(p)
+
+    def _place(self, player, point):
+        b = BIT[point]
+        self.board.points[point] = player
+        own = self.masks[player] | b
+        self.masks[player] = own
+        self.occ |= b
+        self.hand[player] -= 1
+        new = [t for t in TRIANGLES_AT_CORNER[point] if own & t.corner_mask == t.corner_mask]
+        if new:
+            self.tris[player] = tuple(sorted(self.tris[player] + tuple(new), key=_by_index))
 
     def _capture(self, player, tri):
         for q in self.players:
@@ -223,26 +279,32 @@ class GameState:
                 continue
             n = popcount(removed)
             self.masks[q] &= ~removed
+            self.tris[q] = tuple(t for t in self.tris[q] if not t.corner_mask & tri.mask)
             if q == player:
                 self.hand[q] += n
             else:
                 self.captured[player] += n
                 self.lost[q] += n
+        self.occ &= ~tri.mask
         for i in tri.points:
             self.board.points[i] = EMPTY
 
     def _advance(self, mover):
-        movable = [q for q in self.players if self.has_legal_move(q)]
-        self.passed = []
-        if len(movable) <= 1:
-            self.winner = movable[0] if movable else mover
-            self.to_move = None
-            return
+        """Find the next player able to move, or end the game."""
         n = len(self.players)
         i = self.players.index(mover)
+        first = None
+        skipped = []
         for k in range(1, n + 1):
             q = self.players[(i + k) % n]
-            if q in movable:
-                self.to_move = q
-                return
-            self.passed.append(q)
+            if self.has_legal_move(q):
+                if first is not None:  # at least two players can move
+                    self.to_move = first
+                    self.passed = skipped
+                    return
+                first = q
+            elif first is None:
+                skipped.append(q)
+        self.winner = mover if first is None else first
+        self.to_move = None
+        self.passed = []
