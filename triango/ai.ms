@@ -15,10 +15,10 @@ string.setAt = function(index, char)
 end function
 
 if globals.hasIndex("P1") then
-	P1 = str(P1)
-	P2 = str(P2)
-	P3 = str(P3)
-	P4 = str(P4)
+	P1 = str(globals.P1)
+	P2 = str(globals.P2)
+	P3 = str(globals.P3)
+	P4 = str(globals.P4)
 else	//  (for testing in isolation)
 	P1 = "1"; P2 = "2"; P3 = "4"; P4 = "8"
 end if

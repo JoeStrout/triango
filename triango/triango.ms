@@ -64,23 +64,23 @@ clear
 background.setup
 
 triVisDisp = []
-display(6).mode = displayMode.pixel
+display(6).setMode displayMode.pixel
 triVisDisp.push display(6)
-display(5).mode = displayMode.pixel
+display(5).setMode displayMode.pixel
 triVisDisp.push display(5)
 for g in triVisDisp; g.clear color.clear; end for
 
-display(4).mode = displayMode.pixel
+display(4).setMode displayMode.pixel
 boardDisp = display(4)
 boardDisp.clear color.clear
 boardDisp.drawImage boardImg, 
       boardUtil.midX - boardImg.width/2, boardUtil.midY - boardImg.height/2
 
-display(2).mode = displayMode.sprite
+display(2).setMode displayMode.sprite
 spriteDisp = display(2)
 spriteDisp.clear; sprites = spriteDisp.sprites
 
-display(1).mode = displayMode.text
+display(1).setMode displayMode.text
 text = display(1)
 text.clear
 
@@ -110,7 +110,7 @@ end function
 clearStones = function
 	spriteDisp.sprites = []
 	outer.sprites = spriteDisp.sprites
-	stoneAtIndex = {}
+	outer.stoneAtIndex = {}
 end function
 
 addTri = function(indexes, closed=true)
@@ -286,12 +286,12 @@ addStone 43; nextPlayer
 doHumanMove = function
 	while true
 		idx = boardUtil.indexAtXY(mouse)
-		//	text.row = 25
-		//	if idx == null then
-		//		print " " * 25
-		//	else
-		//		print idx + " (" + col + "," + row + ")      "
-		//	end if
+		text.row = 25
+		if idx == null then
+			print " " * 25
+		else
+			print idx + "       " //+ " (" + col + "," + row + ")      "
+		end if
 		if mouse.button then
 			if boardUtil.isEmptySpot(idx) then
 				if boardUtil.violatesEdgeRule(idx, player) or buckets[player].isEmpty then
@@ -314,7 +314,7 @@ doHumanMove = function
 end function
 
 doAIMove = function
-	ai = new ai.BoardNode
+	locals.ai = new ai.BoardNode
 	ai.initFromGameState
 	move = ai.pickMove
 	if move == "c" then

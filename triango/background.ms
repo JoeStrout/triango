@@ -1,7 +1,7 @@
 
 
 setup = function
-	display(7).mode = displayMode.pixel
+	display(7).setMode displayMode.pixel
 	outer.gfx = display(7)
 
 	colors = ["#FFFFFF", "#AAAAFF", "#FFFFAA", "#FFCCCC"]
